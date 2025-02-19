@@ -61,7 +61,7 @@ fn b() {
 }
 
 /*
- * functions call outcomes are:
+ * functions call outcomes may be:
  * 0 0 => b loaded all before a stored the values
  * 10 20 => a stored all the values before b loaded 'em
  * 10 0 => Y is loaded and X is stored, then X is loaded (10) and Y is stored - still intuitive
@@ -69,7 +69,7 @@ fn b() {
  * ... so thread with a(); may fully execute the fn
  * but this doesn't mean that the other thread with b(); sees the result
  *
- * spawn() creates a happens-before between what preceeeds the call and the new thread
+ * spawn() creates a happens-before between what preceeds the call and the new thread
  */
 pub fn run() {
     spawn_and_join();
@@ -94,8 +94,8 @@ fn ff() {
 
 /*
  * # 1 Relaxed ordering is a gatekeeper of the simple guarantee:
- * all operations on atomics happen in some order and don't interfere
- * (!) the order is the same for all threads
+ * all operations on individual atomics happen in some order and don't interfere
+ * (!) the change order of a given atomic is the same for all threads
  */
 fn relaxed_yet_guaranteed() {
     // only this thread does modifications => the order is 0 5 15
@@ -290,6 +290,8 @@ impl Data {
 /*
  * # 3 Sequentially consistent ordering
  * Same as Acquire + Release + global consistent order of all operations.
+ * Diff from the Relaxed is that Relaxed guarantees global consistency for a given variable,
+ * when SeqCst gurantees operations consistency for all involved ops between all threads.
  * Is rarely needed in practice, could be replaced with fence.
  * A typical example is below
  */
