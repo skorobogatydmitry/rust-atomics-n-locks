@@ -15,11 +15,11 @@ use std::{
     sync::{
         atomic::{
             AtomicBool,
-            Ordering::{Acquire, Release},
+            Ordering::{Acquire, Relaxed, Release},
         },
         Condvar, Mutex,
     },
-    thread::scope,
+    thread::{self, scope},
 };
 
 /* A poor-man-s-channel of VecDeque + Condvar
@@ -85,8 +85,8 @@ impl<Y> OneshotChannel<Y> {
      * in all its glory:
      * - calling send 2nd time could cause data race on receiver's side
      * - synchronizing send call from threads is on the end-user too
-     * - calling receive multiple times causes several copies of a possible un-Copy-able object to exist
-     * - the channel doesn't drop its content => unreceived data is to be left hanging
+     * - calling receive multiple times causes several copies of a possibly un-Copy-able object to exist
+     * - the channel doesn't drop its content => unreceived data is left hanging
      */
 
     // SAFETY: only call it once
@@ -102,6 +102,73 @@ impl<Y> OneshotChannel<Y> {
     // SAFETY: only call it once and when .is_ready() == true
     pub unsafe fn receive(&self) -> Y {
         (*self.message.get()).assume_init_read()
+    }
+}
+
+/*
+ * Starting point is the OneshotChannel above and eliminating UB with runtime checks
+ */
+pub struct SafeInRuntimeChannel<Y> {
+    message: UnsafeCell<MaybeUninit<Y>>,
+    ready: AtomicBool,
+    in_use: AtomicBool, // a new field to syncronize self.send
+}
+
+unsafe impl<Y> Sync for SafeInRuntimeChannel<Y> where Y: Send {}
+
+impl<Y> SafeInRuntimeChannel<Y> {
+    pub const fn new() -> Self {
+        Self {
+            message: UnsafeCell::new(MaybeUninit::uninit()),
+            ready: AtomicBool::new(false),
+            in_use: AtomicBool::new(false),
+        }
+    }
+
+    /*
+     * check for self.ready mitigates the UB on calling .receive with self.ready == false
+     * calling it multiple times is handled by swapping self.ready with false
+     * => once a message is received, the channel is reset
+     */
+
+    /// # Panics
+    /// - if there's no message available yet => use is_ready to check before use
+    /// - if the message was already consumed
+    pub fn receive(&self) -> Y {
+        if !self.ready.swap(false, Acquire) {
+            panic!("no message available");
+        }
+        unsafe { (*self.message.get()).assume_init_read() } // now we're sure the method could be called safely
+                                                            // ... but may panic
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.ready.load(Relaxed) // as .receive now Acquire, we could relax the order here
+    }
+
+    /// # Panics
+    /// - there's another send in progress
+    pub fn send(&self, message: Y) {
+        if self.in_use.swap(true, Relaxed) {
+            // a very similar to what's done to self.receive
+            // Relaxed ordering is ok, as there's only 1 atomic involved
+            // and it, as by Relaxed, has the T(otal)M(odification)O(rder)
+            panic!("channel is in use");
+        }
+        unsafe { (*self.message.get()).write(message) }; // the above was the only issue with self.send
+        self.ready.store(true, Release);
+    }
+}
+
+// and the final part - Dropping unreceived messages
+impl<Y> Drop for SafeInRuntimeChannel<Y> {
+    fn drop(&mut self) {
+        if *self.ready.get_mut() {
+            // acquire the lock by getting the exclusive ref to it and deref it
+            unsafe {
+                self.message.get_mut().assume_init_drop();
+            }
+        }
     }
 }
 
@@ -121,24 +188,40 @@ pub fn run() {
         sender.join().unwrap();
     });
 
-    let ch = OneshotChannel::new();
+    let uch = OneshotChannel::new();
     scope(|s| {
         let receiver = s.spawn(|| {
             println!("waiting for a message");
-            while !ch.is_ready() {
+            while !uch.is_ready() {
                 hint::spin_loop();
             }
             // SAFETY: we call it once
-            let msg = unsafe { ch.receive() };
+            let msg = unsafe { uch.receive() };
             println!("received `{msg}'",);
         });
         let sender = s.spawn(|| {
             println!("sending a message");
             // SAFETY: we send it once
-            unsafe { ch.send("a less safe hey!") };
+            unsafe { uch.send("a less safe hey!") };
             println!("sent a message");
         });
         receiver.join().unwrap();
         sender.join().unwrap();
+    });
+
+    let rsch = SafeInRuntimeChannel::new();
+    let t = thread::current();
+    thread::scope(|s| {
+        s.spawn(|| {
+            rsch.send("hello, it's safe!");
+            // rsch.send("hello, it's safe!"); - leads to panic
+            t.unpark(); // unpark the main thread to receive the message
+        });
+        while !rsch.is_ready() {
+            thread::park(); // unpark-park makes happens-before between the threads => is_ready will be set
+        }
+        // rsch.receive(); - leads to panic
+        assert_eq!("hello, it's safe!", rsch.receive());
+        // rsch.receive(); - leads to panic
     });
 }
