@@ -14,7 +14,7 @@ use std::{
     mem::MaybeUninit,
     sync::{
         atomic::{
-            AtomicBool,
+            AtomicBool, AtomicU8,
             Ordering::{Acquire, Relaxed, Release},
         },
         Condvar, Mutex,
@@ -172,6 +172,61 @@ impl<Y> Drop for SafeInRuntimeChannel<Y> {
     }
 }
 
+// it's possible to compress 2 booleans into one u8
+const EMPTY: u8 = 0;
+const WRITING: u8 = 1;
+const READY: u8 = 2;
+const READING: u8 = 3;
+
+pub struct SafeInRuntimeChannelV2<Y> {
+    message: UnsafeCell<MaybeUninit<Y>>,
+    state: AtomicU8,
+}
+
+impl<Y> SafeInRuntimeChannelV2<Y> {
+    fn new() -> Self {
+        Self {
+            message: UnsafeCell::new(MaybeUninit::uninit()),
+            state: AtomicU8::new(EMPTY),
+        }
+    }
+
+    pub fn send(&self, message: Y) {
+        if self
+            .state
+            .compare_exchange(EMPTY, WRITING, Relaxed, Relaxed)
+            .is_err()
+        {
+            panic!("channel is not empty");
+        }
+        unsafe { (*self.message.get()).write(message) };
+        self.state.store(READY, Release); // happens-before is required to make sure message is written
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.state.load(Relaxed) == READY
+    }
+
+    pub fn receive(&self) -> Y {
+        if self
+            .state
+            .compare_exchange(READY, READING, Acquire, Relaxed) // only successful swap requires Acquire so the data is written
+            .is_err()
+        {
+            panic!("channel is not ready");
+        }
+        unsafe { (*self.message.get()).assume_init_read() }
+    }
+}
+
+impl<Y> Drop for SafeInRuntimeChannelV2<Y> {
+    fn drop(&mut self) {
+        if *self.state.get_mut() == READY {
+            unsafe { self.message.get_mut().assume_init_drop() };
+        }
+    }
+}
+
 pub fn run() {
     let ch: Channel<&str> = Channel::new();
     scope(|s| {
@@ -214,14 +269,30 @@ pub fn run() {
     thread::scope(|s| {
         s.spawn(|| {
             rsch.send("hello, it's safe!");
-            // rsch.send("hello, it's safe!"); - leads to panic
+            // rsch.send("hello, it's safe!"); // leads to panic
             t.unpark(); // unpark the main thread to receive the message
         });
         while !rsch.is_ready() {
             thread::park(); // unpark-park makes happens-before between the threads => is_ready will be set
         }
-        // rsch.receive(); - leads to panic
+        // rsch.receive(); // leads to panic
         assert_eq!("hello, it's safe!", rsch.receive());
-        // rsch.receive(); - leads to panic
+        // rsch.receive(); // leads to panic
+    });
+
+    let rsch2 = SafeInRuntimeChannel::new();
+    let t = thread::current();
+    thread::scope(|s| {
+        s.spawn(|| {
+            rsch2.send("hello, it's safe!");
+            // rsch2.send("hello, it's safe!"); // leads to panic
+            t.unpark(); // unpark the main thread to receive the message
+        });
+        while !rsch2.is_ready() {
+            thread::park(); // unpark-park makes happens-before between the threads => is_ready will be set
+        }
+        // rsch2.receive(); // leads to panic
+        assert_eq!("hello, it's safe!", rsch2.receive());
+        // rsch2.receive(); // leads to panic
     });
 }
