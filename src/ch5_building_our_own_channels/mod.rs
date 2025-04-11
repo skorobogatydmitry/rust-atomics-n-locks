@@ -11,15 +11,16 @@ use std::{
     cell::UnsafeCell,
     collections::VecDeque,
     hint,
+    marker::PhantomData,
     mem::MaybeUninit,
     sync::{
         atomic::{
             AtomicBool, AtomicU8,
             Ordering::{Acquire, Relaxed, Release},
         },
-        Condvar, Mutex,
+        Arc, Condvar, Mutex,
     },
-    thread::{self, scope},
+    thread::{self, scope, Thread},
 };
 
 /* A poor-man-s-channel of VecDeque + Condvar
@@ -227,6 +228,219 @@ impl<Y> Drop for SafeInRuntimeChannelV2<Y> {
     }
 }
 
+/*
+ * Safety by types: consuming objects on sending and receiving assures us there are no 2nd calls
+ * ... but it forces to have 2 objects - Sender and Receiver
+ *
+ * it's cool that there's no need for `in_use' as .send can't be called twice. Sender is an oneshot value
+ * it's unfortunate that we need to have Arc, which has its penalty
+ */
+
+// an internal helper to store the message and the flag, non-public
+struct TypeSafeChannel<Y> {
+    message: UnsafeCell<MaybeUninit<Y>>,
+    ready: AtomicBool,
+    // there's no need for in_use, as Sender::send guarantees that there'are no 2 places to call it
+}
+
+unsafe impl<Y> Sync for TypeSafeChannel<Y> where Y: Send {}
+
+pub struct Sender<Y> {
+    channel: Arc<TypeSafeChannel<Y>>, // just store channel - one for the pair
+}
+pub struct Receiver<Y> {
+    channel: Arc<TypeSafeChannel<Y>>,
+}
+
+pub fn typesafe_channel<Y>() -> (Sender<Y>, Receiver<Y>) {
+    let channel = Arc::new(TypeSafeChannel {
+        message: UnsafeCell::new(MaybeUninit::uninit()),
+        ready: AtomicBool::new(false),
+    });
+    (
+        Sender {
+            channel: channel.clone(),
+        },
+        Receiver { channel },
+    )
+}
+
+/* impls are very similar, but:
+ * - methods are split between the Sender and the Receiver
+ * - `send' and `receive' consume self so can't be called multiple times
+ * - `send' can't panic, as it can be used just once
+ */
+
+impl<Y> Sender<Y> {
+    // note that it consumes self
+    pub fn send(self, message: Y) {
+        unsafe { (*self.channel.message.get()).write(message) };
+        self.channel.ready.store(true, Release);
+    }
+}
+
+impl<Y> Receiver<Y> {
+    pub fn is_ready(&self) -> bool {
+        self.channel.ready.load(Relaxed)
+    }
+
+    pub fn receive(self) -> Y {
+        // load false to the flag so Drop can leverage it
+        if !self.channel.ready.swap(false, Acquire) {
+            panic!("no message available");
+        }
+        unsafe { (*self.channel.message.get()).assume_init_read() }
+    }
+}
+
+impl<Y> Drop for TypeSafeChannel<Y> {
+    fn drop(&mut self) {
+        if *self.ready.get_mut() {
+            unsafe { self.message.get_mut().assume_init_drop() }
+        }
+    }
+}
+
+/*
+ * Borrowing to avoid allocation
+ * The same TypeSafeChannel can be borrowed manually by Sender / Receiver to avoid having Arc and
+ * - sacrifice usability
+ * - improve perf
+ */
+
+struct BorrowingSender<'a, Y> {
+    channel: &'a TypeSafeChannel<Y>,
+}
+
+struct BorrowingReceiver<'a, Y> {
+    channel: &'a TypeSafeChannel<Y>,
+}
+
+impl<Y> TypeSafeChannel<Y> {
+    pub const fn new() -> Self {
+        Self {
+            message: UnsafeCell::new(MaybeUninit::uninit()),
+            ready: AtomicBool::new(false),
+        }
+    }
+
+    /*
+     * 1. it borrows self through an exclusive reference
+     * 2. the content behind mut ref isn't used
+     * 3. the method re-inits the structure
+     * 4. so channel could be called multiple times
+     * 5. the new value re-borrowed 2 times - one for Sender and one for Receiver
+     * 6. these borrows have the same lifetime as the original link
+     * 7. self can't be re-borrowed untill Sender and Receiver Drop
+     *
+     * explicit lifetime spec isn't needed here
+     */
+    pub fn split<'a>(&'a mut self) -> (BorrowingSender<'a, Y>, BorrowingReceiver<'a, Y>) {
+        *self = Self::new(); // + invoke Drop for the old channel
+        (
+            BorrowingSender { channel: self },
+            BorrowingReceiver { channel: self },
+        )
+    }
+}
+
+// the rest is pretty much the same...
+
+impl<Y> BorrowingSender<'_, Y> {
+    pub fn send(self, message: Y) {
+        unsafe { (*self.channel.message.get()).write(message) };
+        self.channel.ready.store(true, Release);
+    }
+}
+
+impl<Y> BorrowingReceiver<'_, Y> {
+    pub fn is_ready(&self) -> bool {
+        self.channel.ready.load(Relaxed)
+    }
+    pub fn receive(self) -> Y {
+        if !self.channel.ready.swap(false, Acquire) {
+            panic!("no message available");
+        }
+        unsafe { (*self.channel.message.get()).assume_init_read() }
+    }
+}
+
+// it already exists above
+// impl<Y> Drop for TypeSafeChannel<Y> {
+//     fn drop(&mut self) {
+//         if *self.ready.get_mut() {
+//             unsafe { self.message.get_mut().assume_init_drop() };
+//         }
+//     }
+// }
+
+/*
+ * Blocking - lack of blocking interface to wait for message
+ */
+
+struct BlockingSender<'a, Y> {
+    channel: &'a TypeSafeChannel2<Y>,
+    receiving_thread: Thread, // <-- new
+}
+
+struct BlockingReceiver<'a, Y> {
+    channel: &'a TypeSafeChannel2<Y>,
+    _no_send: PhantomData<*const ()>, // it's not an ownership marker but an anchor to dismiss Send from the type
+                                      // otherwise, receiver can be moved, what invalidates `receiving_thread' variable
+}
+
+// a copy of the above to have 2nd impl
+struct TypeSafeChannel2<Y> {
+    message: UnsafeCell<MaybeUninit<Y>>,
+    ready: AtomicBool,
+}
+
+unsafe impl<Y> Sync for TypeSafeChannel2<Y> where Y: Send {}
+
+impl<Y> TypeSafeChannel2<Y> {
+    fn new() -> Self {
+        Self {
+            message: UnsafeCell::new(MaybeUninit::uninit()),
+            ready: AtomicBool::new(false),
+        }
+    }
+
+    fn split<'a>(&'a mut self) -> (BlockingSender<'a, Y>, BlockingReceiver<'a, Y>) {
+        *self = Self::new();
+        (
+            BlockingSender {
+                channel: self,
+                receiving_thread: thread::current(), // only current thread can receive
+            },
+            BlockingReceiver {
+                channel: self,
+                _no_send: PhantomData,
+            },
+        )
+    }
+}
+
+impl<Y> BlockingSender<'_, Y> {
+    fn send(self, message: Y) {
+        unsafe { (*self.channel.message.get()).write(message) };
+        self.channel.ready.store(true, Release);
+        self.receiving_thread.unpark(); // let the receiving thread know there's data
+    }
+}
+
+// Receiver now waits for the message forever,
+// but doesn't panic if there's no message
+impl<Y> BlockingReceiver<'_, Y> {
+    fn receive(self) -> Y {
+        while !self.channel.ready.swap(false, Acquire) {
+            thread::park();
+        }
+        unsafe { (*self.channel.message.get()).assume_init_read() }
+    }
+}
+
+// ... there are many more options
+
 pub fn run() {
     let ch: Channel<&str> = Channel::new();
     scope(|s| {
@@ -294,5 +508,57 @@ pub fn run() {
         // rsch2.receive(); // leads to panic
         assert_eq!("hello, it's safe!", rsch2.receive());
         // rsch2.receive(); // leads to panic
+    });
+
+    thread::scope(|s| {
+        let (sender, receiver) = typesafe_channel();
+        let t = thread::current();
+        s.spawn(move || {
+            sender.send("a typesafe hello");
+            t.unpark();
+            // sender.send("this message cannot be sent, as the sender is already consumed");
+        });
+        while !receiver.is_ready() {
+            thread::park(); // a little bit inconvenient to wait manually
+        }
+        assert_eq!("a typesafe hello", receiver.receive());
+    });
+
+    let mut tsch = TypeSafeChannel::new();
+    thread::scope(|s| {
+        let (sender, receiver) = tsch.split();
+        let t = thread::current();
+        s.spawn(move || {
+            sender.send("typesafe hello # 1");
+            t.unpark();
+        });
+
+        while !receiver.is_ready() {
+            thread::park();
+        }
+        assert_eq!("typesafe hello # 1", receiver.receive());
+    });
+    // ... and again
+    thread::scope(|s| {
+        let (sender, receiver) = tsch.split();
+        let t = thread::current();
+        s.spawn(move || {
+            sender.send("typesafe hello # 2");
+            t.unpark();
+        });
+
+        while !receiver.is_ready() {
+            thread::park();
+        }
+        assert_eq!("typesafe hello # 2", receiver.receive());
+    });
+
+    // blocking
+    let mut bch = TypeSafeChannel2::new();
+    thread::scope(|s| {
+        let (sender, receiver) = bch.split();
+        s.spawn(move || sender.send("a typesafe hello to the blocked thread"));
+        // YAY! no need for the loop anymore
+        assert_eq!("a typesafe hello to the blocked thread", receiver.receive());
     });
 }
