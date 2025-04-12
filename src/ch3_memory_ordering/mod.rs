@@ -347,13 +347,14 @@ fn sequentially_consistent_order() {
  *
  * fence is like an anchor which aligns operations:
  *
- *                         op1
- *                         op2
- *                         op3
- * Release fence <--> Acquire fence
- *      op4
- *      op5
- *      op6
+ * <------some common anchor-------->
+ *                 |       op1
+ *                 |       op2
+ *                 |       op3
+ * Acquire fence <---> Release fence
+ *      op4        |
+ *      op5        |
+ *      op6        |
  *
  * the above case shows how fences align the timeline
  * (!) but there are no guarantees that the both fences "arrive" to the current moment at the same time
