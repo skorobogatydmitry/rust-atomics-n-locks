@@ -22,13 +22,13 @@ use std::{
     },
 };
 
-struct ArcData<Y> {
+pub struct ArcData<Y> {
     /// number of Arc's
-    data_ref_cnt: AtomicUsize,
+    pub data_ref_cnt: AtomicUsize,
     /// number of Arc's and Weak's
-    alloc_ref_cnt: AtomicUsize,
+    pub alloc_ref_cnt: AtomicUsize,
     /// the data, None for dropped Arc's
-    data: UnsafeCell<Option<Y>>,
+    pub data: UnsafeCell<Option<Y>>,
 }
 
 /// Arc is effectively Weak with some extra
