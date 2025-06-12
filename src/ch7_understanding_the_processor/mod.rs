@@ -15,7 +15,7 @@
  * rustc may reduce functions and calls, structs & enums to bytes and addresses,
  * loops and conditionals to jumps and branch instructions.
  *
- * To look at what rustc does with our program:
+ * To look at what rustc does to our program:
  * - compile as usual + objdump (it leaves around labels if debug) => optimization + only same arch as it was compiled for
  * - `rustc --emit=asm` to tell compiler to make just ASM => lots of supplemental code & info for ASM compiler
  * - cargo-show-asm tool - only your code shown, may connect asm instructions with code lines
@@ -26,8 +26,8 @@
 
 /*
  * a small function
- *`cargo asm --lib 27 --release --target=aarch64-unknown-linux-musl` VS `cargo asm --lib 27 --release --target=x86_64-unknown-linux-musl`
- * x86_64 makes just 1 instruction, ARM - ~5\
+ *`cargo asm --release --target=aarch64-unknown-linux-musl --lib add_ten` VS `cargo asm --release --target=x86_64-unknown-linux-musl --lib add_ten`
+ * x86_64 makes just 1 instruction, ARM - 4
  * 'cause x86_64 is CISC (Complex Instruction Set Computer) while ARM is RISC (Reduced Instruction Set Computer)
  */
 #[unsafe(no_mangle)]
