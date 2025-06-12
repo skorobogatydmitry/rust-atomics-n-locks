@@ -24,6 +24,8 @@
  * Here and later we assume x86_64-unknown-linux-musl and aarch64-unknown-linux-musl targets.
  */
 
+use std::sync::atomic::{AtomicI32, Ordering::*};
+
 /*
  * a small function
  *`cargo asm --release --target=aarch64-unknown-linux-musl --lib add_ten` VS `cargo asm --release --target=x86_64-unknown-linux-musl --lib add_ten`
@@ -34,4 +36,32 @@
 #[allow(dead_code)]
 fn add_ten(num: &mut i32) {
     *num += 10;
+}
+
+/* Load & store
+ * both operations below produces the same code
+ * of one `mov' or `str'.
+ * cargo asm --release --target=aarch64-unknown-linux-musl --lib load_n_store
+ * cargo asm --release --target=x86_64-unknown-linux-musl --lib load_n_store
+ * ```
+ * load_n_store:
+ *     .cfi_startproc
+ *     str wzr, [x0]
+ *     str wzr, [x1]
+ *     ret
+ * ```
+ *
+ * str and mov are already atomic as for relaxed ordering.
+ *
+ * Processor makes diff instructions != we ignore atomicity in the code,
+ * as in some cases processor splits, joins and/or moves operations around.
+ * E.g. look at the transcript below.
+ */
+#[unsafe(no_mangle)]
+#[allow(dead_code, unused_must_use)]
+fn load_n_store(x: &mut i32, y: &mut AtomicI32) -> i32 {
+    *x = 0; // #1 - str wzr, [x0]
+    y.store(0, Relaxed); // #3 - str wzr, [x1]
+    y.load(Relaxed); // #4 - ldr wzr, [x1]
+    *x // #2 - mov w0, wzr
 }
