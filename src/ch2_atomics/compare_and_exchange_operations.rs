@@ -19,7 +19,7 @@ pub fn run() {
 }
 
 // it's a fetch_add, but using compare_replace
-fn increment(a: &AtomicU32) {
+pub fn increment(a: &AtomicU32) {
     let mut current = a.load(Relaxed);
     // a loop of waiting for success
     loop {
