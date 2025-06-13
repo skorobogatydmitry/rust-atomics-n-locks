@@ -168,3 +168,47 @@ fn read_n_modify_and_or_min_max_long_story(x: &AtomicI32) -> i32 {
         }
     }
 }
+
+/// # RISC
+/// Load-linked/store-conditional (LL/SC loop) is the closest analogue to the above loop in RISC.
+/// The store checks whether memory was overwritten
+/// by another thread between now and the previous linked instruction,
+/// load-linked in this case.
+/// The pair could be retried up until the store succeedes.
+///
+/// There are 2 gotchas with the pair:
+/// - only 1 address / core can be tracked
+/// - the store part could have false-negatives (nobody touched the mem, but the store says otherwise)
+///
+/// False-negatives are caused by checking a chunk for modifications instead of a byte.
+///
+/// ## Load-exclusive and store-exclusive
+///
+/// There are no complex operations in RISC - all needs some sync between several operations.
+/// ldxr, strx, clrex (load, store, clear exclusive register) are atomic instructions to implement operations.
+/// clrex is the same as strx but doesn't actually store anything, just links to the prior command.
+///
+/// ```asm,no_run
+/// fetch_add_ten_arm:
+///         .cfi_startproc
+/// .LBB199_1:
+///         ldxr w8, [x0]
+///         add w8, w8, #10
+///         stxr w9, w8, [x0]
+///         cbnz w9, .LBB199_1
+///         ret
+/// ```
+///
+/// The asm code is similar to non-atomic version but ...
+/// with ldrx instead of ldr, strx instead of str and a comparison: cbnz - compare and branch on nonzero.
+/// stxr stores result to x9: 0 => success, 1 => failure.
+///
+/// LL/SC is very flexible, as it creates a sort of "critical section" in between allowing to implement many other atomic operations.
+/// Although extending the gap may cause the loop to spin forever.
+///
+/// There'are new instructions in ARMv8.1 to squeeze even more perf. Right away `cas`` (compare and exchange) is there and some more.
+#[unsafe(no_mangle)]
+#[allow(dead_code, unused_must_use)]
+pub fn fetch_add_ten_arm(x: &AtomicI32) -> i32 {
+    x.fetch_add(10, Relaxed)
+}
