@@ -32,7 +32,6 @@ use std::sync::atomic::{AtomicI32, Ordering::*};
 /// 'cause x86_64 is CISC (Complex Instruction Set Computer) while ARM is RISC (Reduced Instruction Set Computer)
 ///
 #[unsafe(no_mangle)]
-#[allow(dead_code)]
 fn add_ten(num: &mut i32) {
     *num += 10;
 }
@@ -62,7 +61,7 @@ fn add_ten(num: &mut i32) {
 /// E.g. look at the transcript below.
 ///
 #[unsafe(no_mangle)]
-#[allow(dead_code, unused_must_use)]
+#[allow(unused_must_use)]
 fn load_n_store(x: &mut i32, y: &AtomicI32) -> i32 {
     *x = 0; // #1 - str wzr, [x0]
     y.store(0, Relaxed); // #3 - str wzr, [x1]
@@ -92,7 +91,7 @@ fn load_n_store(x: &mut i32, y: &AtomicI32) -> i32 {
 ///
 ///
 #[unsafe(no_mangle)]
-#[allow(dead_code, unused_must_use)]
+#[allow(unused_must_use)]
 fn read_n_modify(x: &AtomicI32) {
     x.fetch_add(10, Relaxed); // lock add  dword ptr [rdi], 10
 }
@@ -103,7 +102,7 @@ fn read_n_modify(x: &AtomicI32) {
 /// The sub can be implemented with an inverted xadd.
 ///
 #[unsafe(no_mangle)]
-#[allow(dead_code, unused_must_use)]
+#[allow(unused_must_use)]
 fn read_n_modify_n_add(x: &AtomicI32) -> i32 {
     // mov eax, 10
     // lock xadd       dword ptr [rdi], eax
@@ -116,7 +115,7 @@ fn read_n_modify_n_add(x: &AtomicI32) -> i32 {
 /// _... to avoid complexity within the compiler, I think_
 ///
 #[unsafe(no_mangle)]
-#[allow(dead_code, unused_must_use)]
+#[allow(unused_must_use)]
 fn read_n_modify_n_or(x: &AtomicI32) -> i32 {
     x.fetch_and(!1, Relaxed)
 }
@@ -150,14 +149,14 @@ fn read_n_modify_n_or(x: &AtomicI32) -> i32 {
 ///     - if not - it returns back to `2.` (eax is already initialized with the new value from memory)
 ///
 #[unsafe(no_mangle)]
-#[allow(dead_code, unused_must_use)]
+#[allow(unused_must_use)]
 fn read_n_modify_and_or_min_max(x: &AtomicI32) -> i32 {
     x.fetch_and(0xfe, Relaxed)
 }
 
 /// The code below get translated into exaclty the same asm as [`read_n_modify_and_or_min_max`]
 #[unsafe(no_mangle)]
-#[allow(dead_code, unused_must_use)]
+#[allow(unused_must_use)]
 fn read_n_modify_and_or_min_max_long_story(x: &AtomicI32) -> i32 {
     let mut current = x.load(Relaxed);
     loop {
@@ -206,9 +205,60 @@ fn read_n_modify_and_or_min_max_long_story(x: &AtomicI32) -> i32 {
 /// LL/SC is very flexible, as it creates a sort of "critical section" in between allowing to implement many other atomic operations.
 /// Although extending the gap may cause the loop to spin forever.
 ///
-/// There'are new instructions in ARMv8.1 to squeeze even more perf. Right away `cas`` (compare and exchange) is there and some more.
+/// There'are new instructions in ARMv8.1 to squeeze even more perf. Right away `cas` (compare and exchange) is there and some more.
 #[unsafe(no_mangle)]
-#[allow(dead_code, unused_must_use)]
+#[allow(unused_must_use)]
 pub fn fetch_add_ten_arm(x: &AtomicI32) -> i32 {
     x.fetch_add(10, Relaxed)
+}
+
+/// ## Compare and exchange @ ARM
+/// It fits quite well to the LL/SC:
+/// ```asm,no_run
+/// cmp_n_xchg_arm:
+///         .cfi_startproc
+///         ldxr w8, [x0]
+///         cmp w8, #5
+///         b.ne .LBB200_2
+///         mov w8, #6
+///         stxr wzr, w8, [x0]
+///         ret
+/// .LBB200_2:
+///         clrex
+///         ret
+/// ```
+///
+#[unsafe(no_mangle)]
+#[allow(unused_must_use)]
+pub fn cmp_n_xchg_arm_weak(x: &AtomicI32) {
+    x.compare_exchange_weak(5, 6, Relaxed, Relaxed);
+}
+
+/// non-weak version makes a more complex code:
+/// ```asm,no_run
+/// cmp_n_xchg_arm:
+///         .cfi_startproc
+///         mov w8, #6
+/// .LBB200_1:
+///         ldxr w9, [x0]
+///         cmp w9, #5
+///         b.ne .LBB200_4
+///         stxr w9, w8, [x0]
+///         cbnz w9, .LBB200_1
+///         ret
+/// .LBB200_4:
+///         clrex
+///         ret
+/// ```
+///
+/// 1. it retries on the store failures
+/// 2. mov is now above all to have it outside of the LL/SC loop
+/// In the case of ARM, a manually written compare-n-exchange loop isn't converted
+/// to a nice LL/SC due to possibly complex intructions in the middle
+/// which could clash with other optimizations.
+///
+#[unsafe(no_mangle)]
+#[allow(unused_must_use)]
+pub fn cmp_n_xchg_arm(x: &AtomicI32) {
+    x.compare_exchange(5, 6, Relaxed, Relaxed);
 }
