@@ -23,7 +23,12 @@
 ///
 /// Here and later we assume x86_64-unknown-linux-musl and aarch64-unknown-linux-musl targets.
 ///
-use std::sync::atomic::{AtomicI32, Ordering::*};
+use std::{
+    hint::black_box,
+    sync::atomic::{AtomicI32, AtomicU64, Ordering::*},
+    thread,
+    time::Instant,
+};
 
 ///
 /// a small function
@@ -262,3 +267,116 @@ pub fn cmp_n_xchg_arm_weak(x: &AtomicI32) {
 pub fn cmp_n_xchg_arm(x: &AtomicI32) {
     x.compare_exchange(5, 6, Relaxed, Relaxed);
 }
+
+/// # Cache
+/// Memory is slow => CPUs leverage caching.
+/// Cache almost isolates processor from memory: all reads and writes go through cache.
+/// The overall memory read logic: in cache & relevant?
+///     yes - return from cache
+///     no  - goto memory -> save to cache & return
+/// Cache has less bytes than memory => there's a cleanup mechanism.
+/// The overall memory write logic:
+///     - keep in cache
+///     - store upon expelling
+/// Cache works with blocks of usually 64 bytes (cache lines).
+///
+/// ## Cache coherence
+/// There are usually several caching levels: L1 talks to L2, L2 to L3.
+/// There could be even 4 levels. Speed: L1 > L2, size: L1 < L2.
+///
+/// It works like a 1-level cache with 1-core systems.
+/// It starts to make difference in case there are multiple cores with its own L1 cache each.
+/// L2, L3, etc are usually shared.
+///
+/// This means L1 can't assume it has the freshest data (another core could change it)
+/// nor can keep writes for itself (another core can't see the write).
+///
+/// It's solved using a cache coherence protocol. Its implementation differs.
+///
+/// ## The write-through protocol
+/// - writes aren't cached but are sent to the next layer
+/// - other caches invalidate respictive lines on observing a write
+/// => no benefit for writes on L1
+///
+/// ## The MESI protocol
+/// It's named after possible cache line states:
+/// - M - modified (but not yet written to memory)
+/// - E - exclusive (has unmodified data, which is not stored in any other cache of the level)
+/// - S - shared (has unmodified data, which may be stored in some other cache of the level)
+/// - I - invalid (unused lines with zeroes or garbage)
+///
+/// Caches in MESI communicate to each other directly to maintain coherency.
+/// 1. Read + cache miss + not in any other cache of the level => (N) get from the next level and make E
+/// 2. Write + E => just write and make M, as other caches of the level don't have the line
+/// 3. Read + cache miss + E is another cache level => get and make it S
+/// 4. Read + cache miss + M is another cache level => flush to the next level and make it S
+/// 5. Read as E (to make a write later) => ask others to I then make own line E
+/// 6. Convert S to E => ask others to I then make own line E
+///
+/// There're variations:
+/// - MOESI - allows sharing M to avoid flushes
+/// - MESIF - determine what exact cache to read for an S
+///
+/// ## Impact on performance
+/// Caching has significant impact on performance of atomics. Atomics are fast =>
+/// need to make a ton of ops to see it. Optimization has to be switched off, of course.
+///
+/// Do `cargo build --release` then run it several times to see example's results.
+///
+#[allow(dead_code)]
+pub fn cache() {
+    example_1();
+    example_2();
+    example_3();
+}
+
+/// It illustrates how much a 10^9 load of U64 take.  
+/// The books says 300ms, I've got 235+/-2ms.
+fn example_1() {
+    // black_box tells compiler that
+    // (1) the value is used and
+    // (2) no assumptions about the nature of changes can be made
+    black_box(&A);
+    let start = Instant::now();
+    // just a lot of operations
+    for _ in 0..1_000_000_000 {
+        black_box(A.load(Relaxed));
+    }
+    println!("example 1: {:?}", start.elapsed());
+}
+
+/// This example illustrates how accessing (loading) atomic from
+/// a background thread affects prefomance.
+/// It takes ~+2ms comparing to the example 1.
+/// The book says there shouldn't be any.
+fn example_2() {
+    black_box(&A);
+    thread::spawn(|| loop {
+        black_box(A.load(Relaxed));
+    });
+    let start = Instant::now();
+    for _ in 0..1_000_000_000 {
+        black_box(A.load(Relaxed));
+    }
+    println!("example 2: {:?}", start.elapsed());
+}
+
+/// Background thread does store now
+/// instead of load from the example 2.
+fn example_3() {
+    black_box(&A);
+    thread::spawn(|| loop {
+        black_box(A.store(0, Relaxed));
+    });
+
+    let start = Instant::now();
+    for _ in 0..1_000_000_000 {
+        black_box(A.load(Relaxed));
+    }
+    println!("example 3: {:?}", start.elapsed());
+}
+
+/// compiler might assume it's always 0
+/// => reference is used in the examples above
+/// to express the fact that there may be other operations happen to other refs
+static A: AtomicU64 = AtomicU64::new(0);
