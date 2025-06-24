@@ -457,3 +457,26 @@ fn example_6() {
     }
     println!("with spaced neighbours: {:?}", start.elapsed());
 }
+
+/// # Reordering
+/// Processor and compiler can reorder instructions. Some examples caused by CPU:
+/// ## Store buffers
+/// CPU may have ones.
+/// It's used to temporary store writes, so CPU can proceed right away.
+/// Store buffer gets emptied in background.  
+/// They're per-core => other cores may not see the writes for a moment.
+///
+/// ## Invalidation queues
+/// It's common for processors to have a queue for cache lines invalidation requests =>
+/// there could be moments when a line invalidation request is sent,
+/// but it's in the queue and other cores aren't aware of the write yet.
+///
+/// ## Pipelining
+/// CPU usually analyze instructions in its execution queue and run them in parallel if it's safe =>
+/// a slow memory operation may still be running while a quick operation on unrelated value in register is already done.
+///
+/// ## Etc
+///
+/// There are other technics and proprietary technologies that may also affect execution order.  
+#[allow(dead_code)]
+fn reordering_placeholder() {}
