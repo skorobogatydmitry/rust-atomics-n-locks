@@ -323,11 +323,13 @@ pub fn cmp_n_xchg_arm(x: &AtomicI32) {
 ///
 /// Do `cargo build --release` then run it several times to see example's results.
 ///
-#[allow(dead_code)]
 pub fn cache() {
     example_1();
     example_2();
     example_3();
+    example_4();
+    example_5();
+    example_6();
 }
 
 /// It illustrates how much a 10^9 load of U64 take.  
@@ -363,6 +365,10 @@ fn example_2() {
 
 /// Background thread does store now
 /// instead of load from the example 2.
+/// It takes longer - from ~700ms to 1.5s,
+/// what's caused by that store
+/// requires exclusive access to a cache line =>
+/// it forces the loads to refresh cache lines (or wait for it to unlock).
 fn example_3() {
     black_box(&A);
     thread::spawn(|| loop {
@@ -376,7 +382,78 @@ fn example_3() {
     println!("example 3: {:?}", start.elapsed());
 }
 
+/// Same as 3, but with compare&exchange that ever only fails.  
+/// Technically, it may not affect prtormance, but some processors
+/// use operations that lock cache lines for these operations
+/// disregard the outcome.
+/// On x86 the example shows the same effect as the 3rd.
+/// => It's sometimes beneficial to
+#[allow(unused_must_use)]
+fn example_4() {
+    black_box(&A);
+    thread::spawn(|| loop {
+        black_box(A.compare_exchange(1, 2, Relaxed, Relaxed));
+    });
+
+    let start = Instant::now();
+    for _ in 0..1_000_000_000 {
+        black_box(A.load(Relaxed));
+    }
+    println!("example 4: {:?}", start.elapsed());
+}
+
 /// compiler might assume it's always 0
 /// => reference is used in the examples above
 /// to express the fact that there may be other operations happen to other refs
 static A: AtomicU64 = AtomicU64::new(0);
+
+/// Cache works on the level of lines, not individual variables.
+static B: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+
+/// Despite the fact that the bg thread doesn't touch B[1],
+/// its load gets slowed down by operations on B[0] and B[2].
+/// It's called false-sharing.
+fn example_5() {
+    black_box(&A);
+    thread::spawn(|| loop {
+        B[0].store(0, Relaxed);
+        B[2].store(0, Relaxed);
+    });
+    let start = Instant::now();
+    for _ in 0..1_000_000_000 {
+        black_box(B[1].load(Relaxed));
+    }
+    println!("with neighbours: {:?}", start.elapsed());
+}
+
+/// False-sharing can be evaded manually
+/// by adding a padding of cache line size
+#[repr(align(64))] // +56 bytes to the structure to make it 1-cache-line-long approx
+struct Spaced(AtomicU64);
+
+static C: [Spaced; 3] = [
+    Spaced(AtomicU64::new(0)),
+    Spaced(AtomicU64::new(0)),
+    Spaced(AtomicU64::new(0)),
+];
+
+/// This example, although does exactly the same
+/// what the 5th in regard of logic,
+/// uses spaced array => isn't affected by the false-sharing effect.
+/// Takeaways:
+/// - don't compress unrelated atomics in memory, it may cause perf drops
+/// - having logically related atomics close may be beneficial
+///     due to high probability for the 2-nd atomic to be already
+///     on an exclusively acquired line
+fn example_6() {
+    black_box(&A);
+    thread::spawn(|| loop {
+        C[0].0.store(0, Relaxed);
+        C[2].0.store(0, Relaxed);
+    });
+    let start = Instant::now();
+    for _ in 0..1_000_000_000 {
+        black_box(C[1].0.load(Relaxed));
+    }
+    println!("with spaced neighbours: {:?}", start.elapsed());
+}
