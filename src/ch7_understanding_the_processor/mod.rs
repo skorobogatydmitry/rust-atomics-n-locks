@@ -480,3 +480,45 @@ fn example_6() {
 /// There are other technics and proprietary technologies that may also affect execution order.  
 #[allow(dead_code)]
 fn reordering_placeholder() {}
+
+/// # Memory Ordering
+/// In rust we have tech to tell the compiler what instructions it shouldn't reorder.
+/// Operation type also tells what reordering is allowed:
+/// - Relaxed || non-atomic => any reordering
+/// - Acquire => can't be pushed forward
+/// - Release => can't be pushed back
+/// - SeqCst => no reordering at all
+///
+/// > Other-Multi-Copy atomicity is a feature of a CPU architecture which guarantees that
+/// > a write visible to one core is visible to all cores in the same moment. Reordering is the only thing
+/// > that causes memory ordering question in Other-Multi-Copy -atomic CPUs. But there are more
+/// > trisky CPUs (like GPUs) which only fit memory model from Chapter 3.
+///
+/// X86 and ARM are very different in regard of ordering:
+/// - weakly ordered: ARM allows to reorder any memory instructions unless cannot
+/// - strongly ordered: X86 is picky about reordering out of the box
+///
+/// ## X86: Strongly Ordered
+///
+/// It doesn't allow:
+/// - pushing load operations forward (as we might expect the code to use just loaded value)
+/// - pulling store operations back (as we might expect the code to compute the value to store)
+///
+/// So:
+/// 1. the only race is could be if a store gets delayed until after a later load
+/// 2. we have load-acquire and store-release for free on X86 => rust doesn't use lock in these cases
+///
+/// In order to make a store SeqCst, rustc uses xchg, which is store & load at the same time
+/// => CPU doesn't re-order it and no lock needed!
+///
+/// Load SeqCst is the same as load-acqure.
+///
+/// tl;dr: X86 has the same cost of all ordering but store SeqCst.
+///
+/// ## ARM64: Weakly Ordered
+///
+/// No blanket guarantees => Release and Acquire are different from Relaxed.
+///
+///
+#[allow(dead_code)]
+fn memory_ordering_placeholder() {}
