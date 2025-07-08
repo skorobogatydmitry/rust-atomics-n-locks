@@ -8,3 +8,4 @@ pub mod ch5_building_our_own_channels;
 #[allow(dead_code)]
 pub mod ch6_building_our_own_arc;
 pub mod ch7_understanding_the_processor;
+pub mod ch8_operating_system_primitives;
