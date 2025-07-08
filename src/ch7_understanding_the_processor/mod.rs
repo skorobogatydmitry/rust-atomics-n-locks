@@ -586,6 +586,6 @@ mod test {
                 });
             }
         });
-        println!("Counter reached {}", counter.load(Relaxed));
+        assert_eq!(4_000_000, counter.load(Relaxed));
     }
 }
