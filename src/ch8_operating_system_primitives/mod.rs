@@ -36,3 +36,28 @@
 //!
 //! There're more: barrier, spin lock, one-time initialization.
 //!
+//! ## Wrapping in Rust
+//! Rust has e.g. borrowing rules, so we can't just wrap C types as-is.
+//! See [Mutex].
+
+use std::cell::UnsafeCell;
+
+/// Interior mutability pattern helps to set rules for the C type => wrap to [UnsafeCell].  
+/// Rust moves objects a lot, but C objects frequently rely on its constant memory address.
+/// This address can be stored somewhere => moving isn't okay. 2 approaches:
+/// - make interface unsafe and let the user deal with it
+/// - hide ownership behind a wrapper
+///
+/// [Box] is a good wrapper for the purpose, as it can be moved, but its content stays in the same place.  
+///
+/// Downsides:
+/// - extra heap allocation for each Mutex
+/// - `Mutex::new` cannot be `const` => no static Mutex-es
+/// - the underlying mutex recursive locking is UB => has to have an `unsafe fn lock`
+/// - a mutex guard can be leaked (leak is safe) => there's an ever-locked mutex noone can drop
+///     > but pthread says destroying a locked mutex is UB  
+///     > lock-unlock-(drop-or-leak) solves the problem, but quite a logic to have in `Drop`
+/// Same is applicable to all of the sync primitives from pthread.
+pub struct Mutex {
+    _m: Box<UnsafeCell<libc::pthread_mutex_t>>,
+}
