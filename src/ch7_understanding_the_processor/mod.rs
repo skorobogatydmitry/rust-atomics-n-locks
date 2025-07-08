@@ -550,7 +550,11 @@ pub fn memory_ordering() {
 /// - spin wait (.swap) should be Acquire to see all or none of another operation
 /// - unlock (locked.store) should be Release to make sure whole or none of the current operation is visible
 ///
+/// > It's important to run it in the `release` mode!
+///
 /// The code always works on X86 (which my laptop is).
+/// Sometimes, it even works on ARM if the processor doesn't use heavily reordering.
+/// But if failed on one of the 100 attempts on Pixel 9.
 ///
 #[cfg(test)]
 mod test {
