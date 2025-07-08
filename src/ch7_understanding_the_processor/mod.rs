@@ -638,3 +638,19 @@ pub fn acqrel_fence() {
 pub fn seqcst_fence() {
     fence(SeqCst);
 }
+
+/// # Chapter 7 summary
+/// 1. Atomic Relaxed store and load are the same as non-atomic on X86 and ARM
+/// 2. Simple fetch-and-modify and compare-and-exchange use special atomic CPU commands
+/// 3. X86 uses compare-n-exchange loop for more complex atomic operations
+/// 4. ARM uses LL/SC cycle for more complex atomic operations
+/// 5. Cache works with lines of 64 bytes usual
+/// 6. Cache is kept coherent between cores with procotols like MESI
+/// 7. Padding can prevent unintended cache lines sharing
+/// 8. Load may be way cheaper than compare-and-exchange e.g. due to required exclusive cache access
+/// 9. Reordering doesn't affect single-threaded programs - CPU takes care of correctness
+/// 10. Memory ordering on X86 and ARM is mostly about memory operations reordering
+/// 11. X86 has Release / Acquire by default => they're the same as Relaxed
+/// 12. Release / Acquire are the same as SeqCst on ARM, but Relaxed is cheaper
+#[allow(dead_code)]
+fn summary_placeholder() {}
