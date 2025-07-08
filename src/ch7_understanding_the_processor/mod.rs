@@ -25,7 +25,7 @@
 ///
 use std::{
     hint::black_box,
-    sync::atomic::{AtomicI32, AtomicU64, Ordering::*},
+    sync::atomic::{fence, AtomicI32, AtomicU64, Ordering::*},
     thread,
     time::Instant,
 };
@@ -592,4 +592,49 @@ mod test {
         });
         assert_eq!(4_000_000, counter.load(Relaxed));
     }
+}
+
+/// # Memory Fences
+/// A fence sets ordering without any operation.  
+/// When compiler_fence just instructs compiler, std::sync::atomic::fence translates to CPU instructions.
+///
+/// - Acquire fence prevents preceeding loads to get pushed down the fence
+/// - Release fence prevents following stores to get pushed up   the fence
+/// - SeqCst  fence prevents any operations to cross the fence
+///
+/// X86 architecture already satisfies Release and Acquire, as usual.
+/// ARM ...
+///
+/// `cargo asm --target=aarch64-unknown-linux-musl --lib memory_fences`
+///
+/// X86 only makes 1 instruction for SeqCst: `mfence` - makes sure all memory ops before it are finished before continuing.  
+/// ARM has special instruction: `dmb` - Data Memory Barrier. It has an argumen, which is either of:
+/// - `ish` - inner shared domain - used for all but Acquire
+/// - `ishld` - inner shared domain load - lightweight (only for loads) - allows preceeding stores to move past it.
+///
+#[allow(dead_code)]
+#[unsafe(no_mangle)]
+pub fn memory_fences() {
+    acquire_fence();
+    release_fence();
+    acqrel_fence();
+    seqcst_fence();
+}
+
+#[unsafe(no_mangle)]
+pub fn acquire_fence() {
+    fence(Acquire);
+}
+
+#[unsafe(no_mangle)]
+pub fn release_fence() {
+    fence(Release);
+}
+
+pub fn acqrel_fence() {
+    fence(AcqRel);
+}
+
+pub fn seqcst_fence() {
+    fence(SeqCst);
 }
