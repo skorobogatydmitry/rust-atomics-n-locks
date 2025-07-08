@@ -518,7 +518,74 @@ fn reordering_placeholder() {}
 /// ## ARM64: Weakly Ordered
 ///
 /// No blanket guarantees => Release and Acquire are different from Relaxed.
+/// Though changes are subtile:
+/// - for store: str -> stlr (store release register)
+/// - for load:  ldr -> ldar (load acquire register)
+/// - for fetch_add with AcqRel:
+///     - ldxr (load exclusive register) -> ldaxr (load acquire exclusive register)
+///     - strx (store exclusive register) ->  stlxr (store release exclusive register)
 ///
+/// These instructions, comparing to the ones used in Relaxed, will never be re-ordered with memory instructions.
+/// > Any fetcch-and-modify with Release or Acquire instead of AcqRel use just one instruction of the two.
 ///
+/// As the AcqRel instructions aren't ever reordered, they're suitable (and used) for SeqCst.
+/// => ARM's AcqRel and SeqCst are the similar.  
+/// Also, Relaxed operations in ARM are chiper as they don't provide extra guarantees.
 #[allow(dead_code)]
-fn memory_ordering_placeholder() {}
+#[unsafe(no_mangle)]
+pub fn memory_ordering() {
+    let x = AtomicI32::new(0);
+    x.store(10, Release);
+    x.fetch_add(10, AcqRel);
+    x.load(Acquire);
+}
+
+/// # Ordering bugs
+/// Incorrect ordering could be unseen on e.g. x86 because it's always AcqRel,
+/// but appear on ARM.
+///
+/// Below is a counter behind spin-lock with Relaxed ordering, which works fine on x86, but may fail on ARM.
+///
+/// Errors:
+/// - spin wait (.swap) should be Acquire to see all or none of another operation
+/// - unlock (locked.store) should be Release to make sure whole or none of the current operation is visible
+///
+/// The code always works on X86 (which my laptop is).
+///
+#[cfg(test)]
+mod test {
+    use std::{
+        sync::atomic::{compiler_fence, AtomicBool, AtomicUsize, Ordering::*},
+        thread,
+    };
+    #[allow(dead_code)]
+    #[test]
+    pub fn ordering_bug() {
+        let locked = AtomicBool::new(false);
+        let counter = AtomicUsize::new(0);
+
+        thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    for _ in 0..1_000_000 {
+                        // wait for the lock to become available
+                        while locked.swap(true, Relaxed) {}
+                        compiler_fence(Acquire); // use the fence to let compiler know the expected ordering =>
+                                                 // compiler doesn't re-order instructions
+
+                        // non-atomic load is fine since we use the boolean to "lock" it
+                        // ... and to see the issue with spinlock
+                        let old = counter.load(Relaxed);
+                        let new = old + 1;
+                        counter.store(new, Relaxed);
+
+                        // release the lock, should be Release
+                        compiler_fence(Release); // Again, make sure the compiler don't mess the code
+                        locked.store(false, Relaxed);
+                    }
+                });
+            }
+        });
+        println!("Counter reached {}", counter.load(Relaxed));
+    }
+}
