@@ -40,7 +40,7 @@ fn f2(x: &mut i32, y: &mut i32) {
  * Threads only have order guarantees when:
  * - spawn / join
  * - mutex lock / unlock
- * - atomic ops with non-related order
+ * - atomic ops with non-relaxed order
  */
 
 // Relaxed is the most basic & performant ordering
