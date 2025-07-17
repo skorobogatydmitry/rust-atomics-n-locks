@@ -56,6 +56,100 @@
 //!
 //! Like with parking and condition variables, futex operations can spuriously wake up.
 //!
+//! ### Futex Operations
+//!
+//! There're more that WAIT and WAKE. The syscall takes:
+//! 1. atomic to operate on
+//! 2. operation code and 2 options: FUTEX_PRIVATE_FLAG, FUTEX_CLOCK_REALTIME
+//! 3. operation-specific tail of parameters
+//!
+//! #### FUTEX_WAIT
+//!
+//! Tail: expected atomic's value and wait timeout.  
+//! Logic: if atomic's value matches - wait until woken up or timeout.
+//!
+//! May spuriously wake.
+//!
+//! The value checking and blocking happens atomically for futex operations.
+//!
+//! FUTEX_CLOCK_REALTIME allows to use system clock instead of monotonic ([std::time::Instant] VS [std::time::SystemTime] in rust).
+//!
+//! Returns: value says whether variable's value matched and whether timeout was reached.
+//!
+//! _No way to tell is we were woken up spuriously?_
+//!
+//! #### FUTEX_WAKE
+//!
+//! Tail: # of threads to wake up (i32).  
+//! Logic: wakes up as many (of fewer) blocked threads as specified.  
+//! Returns: # of woken threads.
+//!
+//! #### FUTEX_WAIT_BITSET
+//!
+//! Tail: expected atomic's value, max time to wait, non-relevant pointer, u32 "bitset".  
+//! Logic: similar to [FUTEX_WAIT](#futex_wait) but:
+//! - if bitset has one or more 1-bits in common with [FUTEX_WAKE_BITSET](#futex_wake_bitset)'s, the thread gets woked up (FUTEX_WAKE can't be ignored)
+//! - timestamp is always absolute, not duration
+//!
+//! The first feature allows to split futex waiters into groups. E.g. "readers" and "writers". Using 2 atomics could be more efficient though.
+//!
+//! #### FUTEX_WAKE_BITSET
+//!
+//! Tail: # of threads to wake up, two pointers to ignore, u32 "bitset".  
+//! Logic: wakes up # of threads where bitset has one or more 1-bits in common with ours.
+//!
+//! With u32::MAX as bitset, it's identical to [FUTEX_WAKE](#futex_wake).
+//!
+//! #### FUTEX_REQUEUE
+//!
+//! Tail: # of threads to wake up, # of threads to re-queue, the address of a secondary atomic variable.  
+//! Logic: wake up # of threads, re-queue # of threads among remaining waiters on the new atomic specified.  
+//! Returns: # of woken threads.
+//!
+//! It's an elegant way to schedule multiple waiters: wake one, leave the rest on another barrier.
+//!
+//! #### FUTEX_CMP_REQUEUE
+//!
+//! Tail: # of threads to wake up, # of threads to re-queue, the address of a secondary atomic variable, the expected value of the current atomic.  
+//! Logic: similar to [FUTEX_REQUEUE](#futex_requeue) but checks the original atomic's value. As usual, comparison and requeue happens atomically for other futex ops.  
+//! Returns: the sum of the number of awoken and requeued threads.
+//!
+//! #### FUTEX_WAKE_OP
+//!
+//! Tail:
+//!   - \# of threads to wake up on the primary atomic variable (i32)
+//!   - \# of threads to potentially wake up on the 2nd atomic variable
+//!   - the address of a secondary atomic variable
+//!   - 32-bit value encoding an operation and a comparison to be made
+//! Logic:
+//!   - modify the secondary atomic variable with the operation
+//!   - wake # of threads on the primary atomic
+//!   - checks the secondary atomic matches the condition
+//!   - if so => wake up # of threads on the secondary variable
+//!
+//! It's a heavily specialized operation. As usual, it happens atomically for other futex ops.  
+//! Code:
+//! ```
+//! let old = atomic2.fetch_update(Relaxed, Relaxed, some_operation);
+//! wake(atomic1, N);
+//! if some_condition(old) {
+//!   wake(atomic2, M);
+//! }
+//! ```
+//!
+//! Available operations:
+//! - assignment
+//! - addition
+//! - binary `or`
+//! - binary `and-not`
+//! - binary `xor`
+//! Argument takes 12 bits in plain or in a form of power of 2.
+//!
+//! Available comparisons: ==, !=, <, <=, >, >=. Argument has similar format.
+//!
+//! `linux-futex` crate may be of a great help in making this argument.
+//!
+//!
 
 use std::cell::UnsafeCell;
 

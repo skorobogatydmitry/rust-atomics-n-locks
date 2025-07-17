@@ -410,8 +410,8 @@ static A: AtomicU64 = AtomicU64::new(0);
 /// Cache works on the level of lines, not individual variables.
 static B: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 
-/// Despite the fact that the bg thread doesn't touch B[1],
-/// its load gets slowed down by operations on B[0] and B[2].
+/// Despite the fact that the bg thread doesn't touch B\[1],
+/// its load gets slowed down by operations on B\[0] and B\[2].
 /// It's called false-sharing.
 fn example_5() {
     black_box(&A);
