@@ -184,6 +184,84 @@
 //!
 //! ## macOS
 //!
+//! Interfaces for syncronization primitives lay in libraries for C (libc), C++ (libc++), Objective-C and Swift.
+//!
+//! libc has pthread due to POSIX compatibility. This pthreads is a foundation for locks in most languages,
+//! but it's slower that on other OS-es. The reason is that macOS-es locks are **fail locks**,
+//! what means that arrived threads are served in the order of arrival.  
+//! This has an overhead on maintaining the order.
+//!
+//! macOS 10.12 introduced `os_unfair_lock` - a new lightweight platform-specific unfail mutex.
+//! It's 32-bit, statically initialized to `OS_UNFAIR_LOCK_INIT` constant, doesn't require destruction.
+//! It can be locked in a blocking and non-blocking way.
+//! It doesn't have condvar and rw variant.
+//!
+//! ## Windows
+//!
+//! "Native API" isn't supposed to be used and is like syscalls.  
+//! "Win32 API" is like the libc and contains everything. It's available through `windows` and `windows-sys` crates.
+//!
+//! ### Heavyweight Kernel Objects
+//!
+//! There're old-fasioned syncronization primitives on Windows implemented as objects. Objects are files-alike: have names, permissions, etc.
+//! Some of them:
+//! - Mutex (lock/unlock)
+//! - Event (signal/wait for)
+//! - WaitableTimer (auto-signal on timeout or interval)
+//!
+//! Creation of an object returns `HANDLE`, as for files. This handle could be easily passed around to e.g wait.
+//!
+//! ### Lighter-Weight Objects
+//!
+//! `critical section` is more lightweight. It denotes a section of code which can be only executed by one threads at a time.
+//! Its functionality is very similar to what a mutex can do.
+//!
+//! `CRITICAL_SECTION` is a _recursive mutex_, which can be locked (entered) and unlocked (leaved).
+//! As a recursive mutex, it protects the section from other threads and ignores re-entering by the same thread.
+//! Hence, it can't be used to obtain `& mut`, because the same thread could obtain it twice from the OS, what's UB.
+//!
+//! ### Slim reader-writer locks
+//!
+//! Windows Vista and newer includes SRW locks (Slim reader-writer locks):
+//! - `SRWLOCK` is one pointer in size
+//! - can be statically initialized with SRWLOCK_INIT
+//! - doesn't require destruction
+//! - movable
+//!
+//! It supports exclusive (writer) / shared (reader) blocking / non-blocking locking / unlocking functions.
+//! It's a ready-to-go mutex if you ignore the reader part.
+//!
+//! It's unfair (tries to maintain order but without guarantees), acquiring second shared lock may lead to deadlock.
+//!
+//! `CONDITION_VARIABLE` was introduced at the same time as `SRWLOCK`. `CONDITION_VARIABLE` is also:
+//! - is one pointer in size
+//! - can be statically initialized with CONDITION_VARIABLE_INIT
+//! - doesn't require destruction
+//! - movable
+//!
+//! It can be used with SRWLOCK or critical section or could be woken up directly.
+//!
+//! ### Address-Based Waiting
+//!
+//! Windows 8 introduced something extremely alike to Linux's `FUTEX_WAIT` and `FUTEX_WAKE`: `WaitOnAddress` and `WakeByAddress`.
+//!
+//! The only major difference is that it can operate on 8, 16, 32 and 64 -bit atomic variables.
+//! It's also the building block for the rest of syncronization primitives of the "Win32 API".
+//!
+//!
+//! # Takeaways
+//! - syscall calls the kernel
+//! - programs usually use libraires, not syscalls
+//! - **libc** crate gives access to **libc**'s functions.
+//! - libc of actual OS-es usually carries more than POSIX C requires / guarantees
+//! - POSIX includes pthreads library with some syncronization primitives
+//! - **pthread_** types are designed for C, what poses some problems on wrapping
+//! - Linux has **FUTEX_** syscall family with waiting and waking on an AtomicU32.
+//! - maacOS has an extra to pthread - `os_unfair_lock`, which is a bit faster on macOS
+//! - Windows objects are heavy-weight primitives
+//! - `SRWLOCK`` and `CONDITION_VARIABLE` are more lightweight and Rust-friendly
+//! - Windows also has futex-like functionality these days
+//!
 
 use std::cell::UnsafeCell;
 
