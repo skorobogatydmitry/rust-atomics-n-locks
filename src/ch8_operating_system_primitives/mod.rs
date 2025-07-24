@@ -126,6 +126,7 @@
 //!   - wake # of threads on the primary atomic
 //!   - checks the secondary atomic matches the condition
 //!   - if so => wake up # of threads on the secondary variable
+//! Returns: total \# of awoken threads
 //!
 //! It's a heavily specialized operation. As usual, it happens atomically for other futex ops.  
 //! Code:
@@ -149,6 +150,39 @@
 //!
 //! `linux-futex` crate may be of a great help in making this argument.
 //!
+//! It was made specifically for one use-case in glibc: to wake up 2 threads on 2 separated atomic variables.
+//! Current implementation no longer uses [FUTEX_WAKE_OP](#futex_wake_op).
+//!
+//! NetBSD supports all these operations too.
+//! OpenBSD supports only [FUTEX_WAKE](#futex_wake), [FUTEX_WAIT](#futex_wait) and [FUTEX_REQUEUE](#futex_requeue).
+//! FreeBSD has no futex, but `_umtx_op`, which includes something close to [FUTEX_WAKE](#futex_wake) and [FUTEX_WAIT](#futex_wait).
+//!
+//! ### FUTEX_PRIVATE_FLAG
+//!
+//! `FUTEX_PRIVATE_FLAG` can be added to any of the operations to enable some optimization.
+//! The optimization takes place if all operations with the same flag happen within the same process.
+//! This allows to skip some expensive steps.
+//!
+//! ### New futex operations
+//!
+//! Linux 5.16 has `futex_waitv`, which waits on multiple variables and respective values at the same time.  
+//! A wake for any variable wakes the thread. It also allows to specify variable size rather than 32-bit of the usual futex.
+//!
+//! ### Priority Inheritance Futex Operations
+//!
+//! Priority inversion happens when a high-priority thread waits on a lock held by a low-priority thread.  
+//! This is solved by temporary pulling the low priority thread's priority. It's called priority inheritance.  
+//! There are 6 more futex operations to implement _priority inheriting locks_.
+//!
+//! In order for kernel to detect locking it needs to add some semantic to the futex-es atomic variable:
+//! - highest bit: whether there're waiting threads
+//! - 2nd highest bit: set if locking thread terminated without unlocking (lock poisoning)
+//! - lowest 30 bits: lock holding thread ID / 0 if none
+//!
+//! The six: `FUTEX_LOCK_PI`, `FUTEX_LOCK_PI2`, `FUTEX_UNLOCK_PI`, `FUTEX_TRYLOCK_PI`, `FUTEX_CMP_REQUEUE_PI` and `FUTEX_WAIT_REQUEUE_PI`.
+//! See `man 2 futex` for details.
+//!
+//! ## macOS
 //!
 
 use std::cell::UnsafeCell;
