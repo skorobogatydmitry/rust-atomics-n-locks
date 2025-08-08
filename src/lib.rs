@@ -9,3 +9,4 @@ pub mod ch5_building_our_own_channels;
 pub mod ch6_building_our_own_arc;
 pub mod ch7_understanding_the_processor;
 pub mod ch8_operating_system_primitives;
+pub mod ch9_building_our_own_locks;
