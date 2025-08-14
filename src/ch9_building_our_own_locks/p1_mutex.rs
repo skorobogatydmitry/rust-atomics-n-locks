@@ -199,7 +199,7 @@ impl<Y> Drop for MutexGuard2<'_, Y> {
 
 /// Guard structure to ease ownership and usage
 pub struct MutexGuard2<'a, Y> {
-    mutex: &'a Mutex2<Y>,
+    pub mutex: &'a Mutex2<Y>, // it's public for the condvar to take it
 }
 
 /// The guard itself is thread-safe to be fancy, IIUC.  

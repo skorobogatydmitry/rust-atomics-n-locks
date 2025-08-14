@@ -11,3 +11,4 @@
 //! - `wake(&AtomicU32)` - wakes all the threads waiting on the atomic variable
 
 pub mod p1_mutex;
+pub mod p2_condition_variable;
