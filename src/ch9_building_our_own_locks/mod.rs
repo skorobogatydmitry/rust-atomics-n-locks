@@ -12,3 +12,4 @@
 
 pub mod p1_mutex;
 pub mod p2_condition_variable;
+pub mod p3_read_write_lock;
