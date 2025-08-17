@@ -90,7 +90,7 @@ impl<Y> RWLock<Y> {
     }
 }
 
-struct ReadGuard<'a, Y> {
+pub struct ReadGuard<'a, Y> {
     lock: &'a RWLock<Y>,
 }
 
@@ -112,7 +112,7 @@ impl<Y> Drop for ReadGuard<'_, Y> {
     }
 }
 
-struct WriteGuard<'a, Y> {
+pub struct WriteGuard<'a, Y> {
     lock: &'a RWLock<Y>,
 }
 
@@ -198,7 +198,7 @@ impl<Y> RWLock2<Y> {
 }
 
 /// Duplicate all guards for [RWLock2] with a twist in [ReadGuard2::drop] and [WriteGuard2::drop]
-struct ReadGuard2<'a, Y> {
+pub struct ReadGuard2<'a, Y> {
     lock: &'a RWLock2<Y>,
 }
 
@@ -221,7 +221,7 @@ impl<Y> Drop for ReadGuard2<'_, Y> {
     }
 }
 
-struct WriteGuard2<'a, Y> {
+pub struct WriteGuard2<'a, Y> {
     lock: &'a RWLock2<Y>,
 }
 
@@ -330,7 +330,7 @@ impl<Y> RWLock3<Y> {
 }
 
 /// Duplicate all guards for [RWLock3] with a twist in [ReadGuard3::drop] and [WriteGuard3::drop]
-struct ReadGuard3<'a, Y> {
+pub struct ReadGuard3<'a, Y> {
     lock: &'a RWLock3<Y>,
 }
 
@@ -355,7 +355,7 @@ impl<Y> Drop for ReadGuard3<'_, Y> {
     }
 }
 
-struct WriteGuard3<'a, Y> {
+pub struct WriteGuard3<'a, Y> {
     lock: &'a RWLock3<Y>,
 }
 
