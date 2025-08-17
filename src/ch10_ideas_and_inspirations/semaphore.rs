@@ -1,6 +1,10 @@
-use std::sync::atomic::{
-    fence, AtomicU32,
-    Ordering::{Acquire, Relaxed, Release},
+use std::{
+    cell::UnsafeCell,
+    ops::{Deref, DerefMut},
+    sync::atomic::{
+        fence, AtomicU32,
+        Ordering::{Acquire, Relaxed, Release},
+    },
 };
 
 use atomic_wait::{wait, wake_one};
@@ -29,6 +33,7 @@ impl Semaphore {
         let mut s = self.counter.load(Relaxed);
         loop {
             if s == 0 {
+                // TODO: that's the place to spin a bit before hanging on wait
                 wait(&self.counter, 0);
                 s = self.counter.load(Relaxed);
             } else {
@@ -66,6 +71,57 @@ impl Semaphore {
                 }
             }
         }
+    }
+}
+
+// A minimal mutex on semaphore
+#[allow(unused)]
+pub struct SphMutex<Y> {
+    semaphore: Semaphore,
+    value: UnsafeCell<Y>,
+}
+
+unsafe impl<Y> Sync for SphMutex<Y> where Y: Send {}
+
+impl<Y> SphMutex<Y> {
+    pub fn new(value: Y) -> Self {
+        let semaphore = Semaphore::new(1);
+        semaphore.up(); // charge
+        Self {
+            semaphore,
+            value: UnsafeCell::new(value),
+        }
+    }
+
+    pub fn lock(&self) -> SphMtxGuard<'_, Y> {
+        self.semaphore.down(); // make the resource unavailable
+        SphMtxGuard { mutex: self }
+    }
+}
+
+pub struct SphMtxGuard<'a, Y> {
+    mutex: &'a SphMutex<Y>,
+}
+
+unsafe impl<Y> Send for SphMtxGuard<'_, Y> where Y: Send {}
+unsafe impl<Y> Sync for SphMtxGuard<'_, Y> where Y: Sync {}
+
+impl<Y> Drop for SphMtxGuard<'_, Y> {
+    fn drop(&mut self) {
+        assert_eq!(1, self.mutex.semaphore.up())
+    }
+}
+
+impl<Y> Deref for SphMtxGuard<'_, Y> {
+    type Target = Y;
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.mutex.value.get() }
+    }
+}
+
+impl<Y> DerefMut for SphMtxGuard<'_, Y> {
+    fn deref_mut(&mut self) -> &mut Y {
+        unsafe { &mut *self.mutex.value.get() }
     }
 }
 
@@ -140,5 +196,26 @@ mod test {
     #[should_panic(expected = "semaphore with 0 as a treshold isn't usable")]
     fn test_new_panics() {
         Semaphore::new(0);
+    }
+
+    #[test]
+    fn test_mutex() {
+        let m = SphMutex::new(10);
+
+        scope(|s| {
+            s.spawn(|| {
+                let mut g = m.lock();
+                assert_eq!(10, *g);
+                // force the other thread to wait - checked with println
+                sleep(Duration::from_millis(100));
+                *g += 1;
+            });
+
+            s.spawn(|| {
+                // let the 1st thread to acquire lock
+                sleep(Duration::from_millis(20));
+                assert_eq!(11, *m.lock());
+            });
+        });
     }
 }
