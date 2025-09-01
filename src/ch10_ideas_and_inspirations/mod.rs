@@ -36,6 +36,18 @@
 //! - with a pointer to the last element to speed up `push_back`
 //!
 //! This pattern allows to implement locking primitives with thread parking (without `wake_all` capability).
+//!
+//! ## Parking Lot-Based Locks
+//!
+//! The idea is to have a global HashMap, which maps memory addresses to queues of threads waiting on an address.
+//! > This HashMap is usually called a parking lot.
+//!
+//! Mutex requires 2 bits to track state: `is_locked` and `has_queue`. They can be squeezed into the pointer.
+//! It makes Mutex's memory cost very low.
+//!
+//! This approach allows to provided a futex-like functionality on platforms where there's no futex provided by OS.
+//!
+//! There's a Rust crate called [parking_lot](https://crates.io/crates/parking_lot).
 
 /// ## Semaphore
 ///
@@ -46,7 +58,7 @@
 /// See the module for my attempt implementing it.
 ///
 /// From the book:
-/// - semaphore could be a combilation of Mutex<u32> + Condvar
+/// - semaphore could be a combilation of `Mutex<u32>` + Condvar
 /// - Mutex can be implemented with Semaphore
 /// - don't ~~cros the streams~~ implement 'em in matryoshka style
 pub mod semaphore;
@@ -73,3 +85,19 @@ pub mod semaphore;
 /// - quiescent state tracking: make sure all threads arrived at the point where the pointer isn't in use
 #[cfg(test)]
 pub mod rcu;
+
+/// ## Sequence lock
+///
+/// It's an approach, alternative to RCU, that allows to update big data structures without traditional locks.
+///
+/// There's one counter, which is:
+/// - even if the data is available for reading
+/// - even if the data is being updated
+///
+/// The writer should increment the counter once to "lock" the data and increment it once more after modifications.
+///
+/// The reader can read data at any point and check if it's consistent by comparing the counter before and after the read operation.
+///
+/// This pattern is heavily used in embedded systems, Linux, with shared memory, in multi-process environments.
+#[allow(unused)]
+pub mod seqlock;

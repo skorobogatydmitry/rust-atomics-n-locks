@@ -34,7 +34,7 @@
 //!
 //! There's no good way around it, so we consider the possibility for the abovementioned to happen negligible.
 //!
-//! See [test::test_condvar].
+//! See `test::test_condvar`.
 //!
 //! ## Avoiding syscalls
 //! There's no need in trying to avoid the wait call, as waiting is the expected thing to happen for Condvars.

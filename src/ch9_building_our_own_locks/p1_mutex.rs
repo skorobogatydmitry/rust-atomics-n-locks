@@ -56,7 +56,7 @@ pub struct Mutex<Y> {
     value: UnsafeCell<Y>,
 }
 
-/// promise to the compiler that it's safe to share if the underlying value is safe to send
+/// promise to the compiler that it's safe to share a Mutex if its underlying value is safe to send
 unsafe impl<Y> Sync for Mutex<Y> where Y: Send {}
 
 impl<Y> Mutex<Y> {
