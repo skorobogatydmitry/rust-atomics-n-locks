@@ -65,9 +65,46 @@ impl<Y> SeqLock<Y> {
 mod test {
     use super::*;
     use std::{
-        thread::{scope, sleep},
+        thread::{self, scope, sleep},
         time::Duration,
     };
+
+    struct TwoFields {
+        a: usize,
+        b: usize,
+    }
+
+    /// check read consistency:
+    /// 1. start writing (change 1/2 of a struct)
+    /// 2. sleep 100ms
+    /// 3. make sure both values are still old from a reader
+    /// 4. change the 2nd variable
+    /// 5. make sure both changed from the reader's standpoint
+    #[test]
+    fn test_read_consistency() {
+        let data = SeqLock::new(TwoFields { a: 0, b: 0 });
+        scope(|s| {
+            s.spawn(|| {
+                data.read(|it| {
+                    thread::sleep(Duration::from_millis(10)); // let the writer to change 1 value
+                    assert_eq!(0, it.b);
+                    assert_eq!(0, it.a);
+                });
+            });
+            s.spawn(|| {
+                data.write(|it| {
+                    it.a += 1;
+                    thread::sleep(Duration::from_millis(50)); // let it be inconsistent for some time
+                    it.b += 1;
+                });
+            });
+        });
+
+        data.read(|it| {
+            assert_eq!(1, it.b);
+            assert_eq!(1, it.a);
+        });
+    }
 
     /// 2 threads add 1 to the seqlock 10 times each with delay between the ops
     /// practice shows that the threads race for operations in this test,
