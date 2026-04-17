@@ -58,7 +58,7 @@ impl<Y> RWLock<Y> {
     }
 
     /// lock rwlock for reads, probably not for the 1st time
-    pub fn read(&self) -> ReadGuard<Y> {
+    pub fn read(&self) -> ReadGuard<'_, Y> {
         let mut s = self.state.load(Relaxed);
         loop {
             // there's no write lock
@@ -80,7 +80,7 @@ impl<Y> RWLock<Y> {
     }
 
     /// lock the rwlock for writes
-    pub fn write(&self) -> WriteGuard<Y> {
+    pub fn write(&self) -> WriteGuard<'_, Y> {
         // The non-_weak version is used, as there's already quite a chance to repepat this loop:
         // we don't want any false-negatives
         while let Err(s) = self.state.compare_exchange(0, u32::MAX, Acquire, Relaxed) {
@@ -161,7 +161,7 @@ impl<Y> RWLock2<Y> {
     }
 
     /// exactly the same as [RWLock::read]
-    pub fn read(&self) -> ReadGuard2<Y> {
+    pub fn read(&self) -> ReadGuard2<'_, Y> {
         let mut s = self.state.load(Relaxed);
         loop {
             if s < u32::MAX {
@@ -179,7 +179,7 @@ impl<Y> RWLock2<Y> {
     }
 
     /// engage the new field to avoid spinning more than needed
-    pub fn write(&self) -> WriteGuard2<Y> {
+    pub fn write(&self) -> WriteGuard2<'_, Y> {
         while self
             .state
             .compare_exchange(0, u32::MAX, Acquire, Relaxed)
@@ -269,7 +269,7 @@ impl<Y> RWLock3<Y> {
     }
 
     /// check for odd / even self.state instead of just increments and U32::MAX
-    pub fn read(&self) -> ReadGuard3<Y> {
+    pub fn read(&self) -> ReadGuard3<'_, Y> {
         let mut s = self.state.load(Relaxed);
         loop {
             // was: `if s < u32::MAX {`
@@ -290,7 +290,7 @@ impl<Y> RWLock3<Y> {
     }
 
     /// singificantly changed
-    pub fn write(&self) -> WriteGuard3<Y> {
+    pub fn write(&self) -> WriteGuard3<'_, Y> {
         let mut s = self.state.load(Relaxed);
         loop {
             // try to lock if unlocked

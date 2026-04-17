@@ -7,11 +7,11 @@
 //! Rust program -> Rust's StL -> OS lib (e.g. glibc) -> OS syscall within kernel.
 //! A. `libc` crate could interfere the above path.
 //! B. syscalls could be called manually through `interrupts`.
-//!   
+//!
 //! The above way is the idiomatic one, though you can call the OS lib directly.
 //!
-//! Linux: syscalls are stable and reliable  
-//! MacOS: syscalls aren't stable => a lot better to use libraries  
+//! Linux: syscalls are stable and reliable
+//! MacOS: syscalls aren't stable => a lot better to use libraries
 //! Windows: no POSIX (a small lie), no libc, but has separated set of libraries e.g. kernel32.dll => no syscalls fun either
 //!
 //! Mutex-es could be syscalls, but it's slow. Usually syscalls implement something bigger like `sleep` or `wake`.
@@ -21,17 +21,17 @@
 //! - `pthread_create`
 //! - `pthread_join`
 //! - `pthread_mutex_t`
-//!   > It has methods to create and destroy a mutex. The creation takes configuratrion.  
-//!   > Mutex-es behaviour on double-locking within a single thread could be configured: UB, error, deadlock, re-lock.  
+//!   > It has methods to create and destroy a mutex. The creation takes configuratrion.
+//!   > Mutex-es behaviour on double-locking within a single thread could be configured: UB, error, deadlock, re-lock.
 //!   > There're functions to lock, try to lock, lock for a specified timeframe and unlock a mutex.
 //! - `pthread_rwlock_r`
-//!   > Also has init and destroy functions.  
-//!   > Has a lot less configuration options. E.g. it always deadlock on double-locking for write and a recursive read lock always succeeds.  
-//!   > So there's no way to prioritize writers in wrappers for this lock.  
+//!   > Also has init and destroy functions.
+//!   > Has a lot less configuration options. E.g. it always deadlock on double-locking for write and a recursive read lock always succeeds.
+//!   > So there's no way to prioritize writers in wrappers for this lock.
 //!   > Locking interface is identical but there're 2 functions for locking: r and w.
 //! - `pthread_cond_t`
-//!   > Also has init and destroy functions and just a few options.  
-//!   > Time-limited functions may use monotonic or real-time clock.  
+//!   > Also has init and destroy functions and just a few options.
+//!   > Time-limited functions may use monotonic or real-time clock.
 //!   > There are 2 counterparts: `pthread_cond_timedwait` to wait and `pthread_cond_signal` to wake one (`_broadcast` to wake all threads).
 //!
 //! There're more: barrier, spin lock, one-time initialization.
@@ -41,14 +41,14 @@
 //! See [Mutex].
 //!
 //! ## Linux
-//! All pthread primitives are made using `futex` syscall. It operates on a 32-bit atomic integer.  
+//! All pthread primitives are made using `futex` syscall. It operates on a 32-bit atomic integer.
 //! Two main operations:
 //! - FUTEX_WAIT - puts current thread to sleep
 //! - FUTEX_WAKE - wakes the thread which sleeps on the atomic variable
 //!
-//! The two don't store anything in the integer.  
+//! The two don't store anything in the integer.
 //! FUTEX_WAIT requires the expected value the variable should have, doesn't wait otherwise.
-//! FUTEX_WAIT is atomic from the WAKE's perspective.  
+//! FUTEX_WAIT is atomic from the WAKE's perspective.
 //! The two features of WAIT allows to make sure a WAKE isn't lost by changing for value before WAKE.
 //! So the changed value dismiss any WAIT calls which are late-comers.
 //!
@@ -65,7 +65,7 @@
 //!
 //! #### FUTEX_WAIT
 //!
-//! Tail: expected atomic's value and wait timeout.  
+//! Tail: expected atomic's value and wait timeout.
 //! Logic: if atomic's value matches - wait until woken up or timeout.
 //!
 //! May spuriously wake.
@@ -80,13 +80,13 @@
 //!
 //! #### FUTEX_WAKE
 //!
-//! Tail: # of threads to wake up (i32).  
-//! Logic: wakes up as many (of fewer) blocked threads as specified.  
+//! Tail: # of threads to wake up (i32).
+//! Logic: wakes up as many (of fewer) blocked threads as specified.
 //! Returns: # of woken threads.
 //!
 //! #### FUTEX_WAIT_BITSET
 //!
-//! Tail: expected atomic's value, max time to wait, non-relevant pointer, u32 "bitset".  
+//! Tail: expected atomic's value, max time to wait, non-relevant pointer, u32 "bitset".
 //! Logic: similar to [FUTEX_WAIT](#futex_wait) but:
 //! - if bitset has one or more 1-bits in common with [FUTEX_WAKE_BITSET](#futex_wake_bitset)'s, the thread gets woked up (FUTEX_WAKE can't be ignored)
 //! - timestamp is always absolute, not duration
@@ -95,23 +95,23 @@
 //!
 //! #### FUTEX_WAKE_BITSET
 //!
-//! Tail: # of threads to wake up, two pointers to ignore, u32 "bitset".  
+//! Tail: # of threads to wake up, two pointers to ignore, u32 "bitset".
 //! Logic: wakes up # of threads where bitset has one or more 1-bits in common with ours.
 //!
 //! With u32::MAX as bitset, it's identical to [FUTEX_WAKE](#futex_wake).
 //!
 //! #### FUTEX_REQUEUE
 //!
-//! Tail: # of threads to wake up, # of threads to re-queue, the address of a secondary atomic variable.  
-//! Logic: wake up # of threads, re-queue # of threads among remaining waiters on the new atomic specified.  
+//! Tail: # of threads to wake up, # of threads to re-queue, the address of a secondary atomic variable.
+//! Logic: wake up # of threads, re-queue # of threads among remaining waiters on the new atomic specified.
 //! Returns: # of woken threads.
 //!
 //! It's an elegant way to schedule multiple waiters: wake one, leave the rest on another barrier.
 //!
 //! #### FUTEX_CMP_REQUEUE
 //!
-//! Tail: # of threads to wake up, # of threads to re-queue, the address of a secondary atomic variable, the expected value of the current atomic.  
-//! Logic: similar to [FUTEX_REQUEUE](#futex_requeue) but checks the original atomic's value. As usual, comparison and requeue happens atomically for other futex ops.  
+//! Tail: # of threads to wake up, # of threads to re-queue, the address of a secondary atomic variable, the expected value of the current atomic.
+//! Logic: similar to [FUTEX_REQUEUE](#futex_requeue) but checks the original atomic's value. As usual, comparison and requeue happens atomically for other futex ops.
 //! Returns: the sum of the number of awoken and requeued threads.
 //!
 //! #### FUTEX_WAKE_OP
@@ -128,9 +128,9 @@
 //!   - if so => wake up # of threads on the secondary variable
 //! Returns: total \# of awoken threads
 //!
-//! It's a heavily specialized operation. As usual, it happens atomically for other futex ops.  
+//! It's a heavily specialized operation. As usual, it happens atomically for other futex ops.
 //! Code:
-//! ```
+//! ```ignore
 //! let old = atomic2.fetch_update(Relaxed, Relaxed, some_operation);
 //! wake(atomic1, N);
 //! if some_condition(old) {
@@ -165,13 +165,13 @@
 //!
 //! ### New futex operations
 //!
-//! Linux 5.16 has `futex_waitv`, which waits on multiple variables and respective values at the same time.  
+//! Linux 5.16 has `futex_waitv`, which waits on multiple variables and respective values at the same time.
 //! A wake for any variable wakes the thread. It also allows to specify variable size rather than 32-bit of the usual futex.
 //!
 //! ### Priority Inheritance Futex Operations
 //!
-//! Priority inversion happens when a high-priority thread waits on a lock held by a low-priority thread.  
-//! This is solved by temporary pulling the low priority thread's priority. It's called priority inheritance.  
+//! Priority inversion happens when a high-priority thread waits on a lock held by a low-priority thread.
+//! This is solved by temporary pulling the low priority thread's priority. It's called priority inheritance.
 //! There are 6 more futex operations to implement _priority inheriting locks_.
 //!
 //! In order for kernel to detect locking it needs to add some semantic to the futex-es atomic variable:
@@ -188,7 +188,7 @@
 //!
 //! libc has pthread due to POSIX compatibility. This pthreads is a foundation for locks in most languages,
 //! but it's slower that on other OS-es. The reason is that macOS-es locks are **fail locks**,
-//! what means that arrived threads are served in the order of arrival.  
+//! what means that arrived threads are served in the order of arrival.
 //! This has an overhead on maintaining the order.
 //!
 //! macOS 10.12 introduced `os_unfair_lock` - a new lightweight platform-specific unfail mutex.
@@ -198,7 +198,7 @@
 //!
 //! ## Windows
 //!
-//! "Native API" isn't supposed to be used and is like syscalls.  
+//! "Native API" isn't supposed to be used and is like syscalls.
 //! "Win32 API" is like the libc and contains everything. It's available through `windows` and `windows-sys` crates.
 //!
 //! ### Heavyweight Kernel Objects
@@ -265,20 +265,20 @@
 
 use std::cell::UnsafeCell;
 
-/// Interior mutability pattern helps to set rules for the C type => wrap to [UnsafeCell].  
+/// Interior mutability pattern helps to set rules for the C type => wrap to [UnsafeCell].
 /// Rust moves objects a lot, but C objects frequently rely on its constant memory address.
 /// This address can be stored somewhere => moving isn't okay. 2 approaches:
 /// - make interface unsafe and let the user deal with it
 /// - hide ownership behind a wrapper
 ///
-/// [Box] is a good wrapper for the purpose, as it can be moved, but its content stays in the same place.  
+/// [Box] is a good wrapper for the purpose, as it can be moved, but its content stays in the same place.
 ///
 /// Downsides:
 /// - extra heap allocation for each Mutex
 /// - `Mutex::new` cannot be `const` => no static Mutex-es
 /// - the underlying mutex recursive locking is UB => has to have an `unsafe fn lock`
 /// - a mutex guard can be leaked (leak is safe) => there's an ever-locked mutex noone can drop
-///     > but pthread says destroying a locked mutex is UB  
+///     > but pthread says destroying a locked mutex is UB
 ///     > lock-unlock-(drop-or-leak) solves the problem, but quite a logic to have in `Drop`
 /// Same is applicable to all of the sync primitives from pthread.
 pub struct Mutex {
@@ -296,12 +296,12 @@ use std::sync::atomic::AtomicU32;
 /// - in a side-thread:
 ///     - flip value to 1
 ///     - wake the main
-/// It's important that the FUTEX_WAIT is in the loop that checks for atomic to be flipped.  
+/// It's important that the FUTEX_WAIT is in the loop that checks for atomic to be flipped.
 /// If we just wait on 0, the main thread can be waked spontaneously.
 /// It's important that FUTEX_WAIT checks that the atomic variable is still 0 before going to sleep.
 /// Otherwise, the WAKE can be lost between entering the loop and the WAIT call.
 ///
-/// Futex allows to avoid any unneeded syscalls by checking the atomic.  
+/// Futex allows to avoid any unneeded syscalls by checking the atomic.
 /// E.g., the main thread doesn't enter the loop if the variable is flipped to 1.
 /// Also, the side-thread can skip the WAKE if the main thread is waiting.
 /// Hence, futex allows to skip all unnecessary syscalls implementing parking.
