@@ -22,7 +22,7 @@ impl<Y> SeqLock<Y> {
         }
     }
 
-    /// "locks" the value and executes the supplied Fn on it  
+    /// "locks" the value and executes the supplied Fn on it
     /// it returns None in all cases when the value isn't accessible for writes
     fn write<U, F>(&self, func: F) -> Option<U>
     where
@@ -65,6 +65,7 @@ impl<Y> SeqLock<Y> {
 mod test {
     use super::*;
     use std::{
+        sync::{atomic::AtomicBool, Mutex},
         thread::{self, scope, sleep},
         time::Duration,
     };
@@ -77,7 +78,7 @@ mod test {
     /// check read consistency:
     /// 1. start writing (change 1/2 of a struct)
     /// 2. sleep 100ms
-    /// 3. make sure both values are still old from a reader
+    /// 3. make sure the reader sees inconsistent values and the operation failed
     /// 4. change the 2nd variable
     /// 5. make sure both changed from the reader's standpoint
     #[test]
@@ -85,11 +86,14 @@ mod test {
         let data = SeqLock::new(TwoFields { a: 0, b: 0 });
         scope(|s| {
             s.spawn(|| {
-                data.read(|it| {
-                    thread::sleep(Duration::from_millis(10)); // let the writer to change 1 value
-                    assert_eq!(0, it.b);
-                    assert_eq!(0, it.a);
-                });
+                assert_eq!(
+                    None,
+                    data.read(|it| {
+                        thread::sleep(Duration::from_millis(10)); // let the writer to change 1 value
+                        assert_eq!(1, it.a);
+                        assert_eq!(0, it.b);
+                    })
+                );
             });
             s.spawn(|| {
                 data.write(|it| {
@@ -157,12 +161,15 @@ mod test {
     /// - wait for the writer to unlock then read the value successfully
     #[test]
     fn test_writer_block_readers() {
+        let firewall = AtomicBool::new(true);
         let sl = SeqLock::new(0_u32);
         scope(|s| {
             s.spawn(|| {
                 sl.write(|data: &mut u32| {
                     *data += 1;
-                    sleep(Duration::from_millis(200));
+                    while firewall.load(Acquire) {
+                        hint::spin_loop();
+                    }
                 })
             });
 
@@ -170,6 +177,7 @@ mod test {
                 for _ in 0..10 {
                     assert!(sl.read(|data| std::hint::black_box(data + 10)).is_none());
                 }
+                firewall.store(false, Release);
             });
 
             sleep(Duration::from_millis(200));
